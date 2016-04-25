@@ -21,7 +21,7 @@ class Config(object):
     lr = 0.001
     training_iters = 12500
     batch_size = 360
-    display_step = 10
+    display_step = 500
     num_layers = 2
     n_input = 3
     n_steps = 20 #timestep
@@ -42,7 +42,7 @@ class Model(object):
         _X = tf.reshape(_X, [-1, config.n_input]) # (n_steps*batch_size, n_input)
 
         # Define a lstm cell with tensorflow
-        cell = lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=1.0)
+        cell = lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=0.6)
 #        cell = rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
 
 #        lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=0.5)
@@ -67,6 +67,11 @@ class Model(object):
         correct_pred = tf.equal(tf.argmax(logits,1), tf.argmax(self.targets,1))
         self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
+        with tf.name_scope('summaries'):
+            tf.scalar_summary('cost', self.cost)
+            tf.scalar_summary('accuracy', self.accuracy)
+        self.summary = tf.merge_all_summaries()
+
 def main():
     if not FLAGS.csv_path:
         raise ValueError("must set --csv_path")
@@ -77,6 +82,7 @@ def main():
     model = Model(config)
 
     with tf.Session() as sess:
+        writer = tf.train.SummaryWriter("log_tb", sess.graph)
         tf.initialize_all_variables().run()
         step = 1
         for step in range(config.training_iters):
@@ -90,31 +96,13 @@ def main():
 
             if step % config.display_step == 0:
                 # Calculate batch accuracy
-                acc, loss = sess.run([model.accuracy, model.cost],
+                acc, loss, summary = sess.run([model.accuracy, model.cost, model.summary],
                         feed_dict={model.input_data: batch_xs, model.targets: batch_ys,
                             model.initial_state: np.zeros((batch_xs.shape[0], 2*config.n_hidden))})
                 print("Index %d, Minibatch Loss= %f, Training Accuracy %f"%((villani.train.index_in_epoch, loss, acc)))
+                writer.add_summary(summary)
+                writer.flush()
         print("Optimization Finished!")
-
-#        test_start = 0
-#        test_end = 120
-#        test_len = test_end - test_start
-#        test_data = villani.test.keystrokes[test_start:test_end].reshape((-1, config.n_steps, config.n_input))
-#        test_label = villani.test.labels[test_start:test_end].reshape((-1, config.n_steps, config.n_classes))[:,7]
-#        print("Testing Accuracy:", sess.run(model.accuracy, feed_dict={model.input_data: test_data,
-#                                                                 model.targets: test_label,
-#                                                                 model.initial_state:
-#                                                                 np.zeros((test_data.shape[0], 2*config.n_hidden))}))
-#
-#        test_start = 6000
-#        test_end = 6030
-#        test_len = test_end - test_start
-#        test_data = villani.test.keystrokes[test_start:test_end].reshape((-1, config.n_steps, config.n_input))
-#        test_label = villani.test.labels[test_start:test_end].reshape((-1, config.n_steps, config.n_classes))[:,7]
-#        print("Testing Accuracy:", sess.run(model.accuracy, feed_dict={model.input_data: test_data,
-#                                                                 model.targets: test_label,
-#                                                                 model.initial_state:
-#                                                                 np.zeros((test_data.shape[0], 2*config.n_hidden))}))
 
 if __name__ == "__main__":
     main()
