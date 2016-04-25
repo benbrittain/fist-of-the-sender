@@ -5,6 +5,7 @@
 import tensorflow as tf
 import numpy as np
 import reader
+import os
 from tensorflow.models.rnn import rnn, rnn_cell
 
 flags = tf.flags
@@ -21,13 +22,16 @@ class Config(object):
     lr = 0.001
     training_iters = 12500
     batch_size = 360
-    display_step = 500
+    display_step = 100
     num_layers = 2
     n_input = 3
     n_steps = 20 #timestep
 
-    n_hidden = 128
+    n_hidden = 256
     n_classes = 256 # potential users
+    log_dir = 'keystroke_log'
+    save_dir = 'keystroke_models'
+    save_frequency = 1000
 
 class Model(object):
     def __init__(self, config):
@@ -42,17 +46,12 @@ class Model(object):
         _X = tf.reshape(_X, [-1, config.n_input]) # (n_steps*batch_size, n_input)
 
         # Define a lstm cell with tensorflow
-        cell = lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=0.6)
-#        cell = rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
-
+        cell = lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=1.0)
 #        lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=0.5)
 
         # Split data because rnn cell needs a list of inputs for the RNN inner loop
         _X = tf.split(0, config.n_steps, _X) # n_steps * (batch_size, n_hidden)
-
-        # LSTM cell output
         outputs, states = rnn.rnn(cell, _X, initial_state=self.initial_state)
-        #output = tf.reshape(tf.concat(1, outputs), [-1, config.n_hidden])
 
         with tf.variable_scope('output'):
             softmax_w = tf.get_variable("softmax_w", [config.n_hidden, config.n_classes])
@@ -82,8 +81,9 @@ def main():
     model = Model(config)
 
     with tf.Session() as sess:
-        writer = tf.train.SummaryWriter("log_tb", sess.graph)
+        writer = tf.train.SummaryWriter(config.log_dir, sess.graph)
         tf.initialize_all_variables().run()
+        saver = tf.train.Saver(tf.all_variables())
         step = 1
         for step in range(config.training_iters):
             batch_xs, batch_ys = villani.train.next_batch(config.batch_size)
@@ -102,6 +102,11 @@ def main():
                 print("Index %d, Minibatch Loss= %f, Training Accuracy %f"%((villani.train.index_in_epoch, loss, acc)))
                 writer.add_summary(summary)
                 writer.flush()
+
+            if step % config.save_frequency == 0:
+                checkpoint_path = os.path.join(config.save_dir, 'model.ckpt')
+                saver.save(sess, checkpoint_path, global_step = step)
+
         print("Optimization Finished!")
 
 if __name__ == "__main__":
