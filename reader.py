@@ -9,7 +9,7 @@ def extract_keystrokes(filename):
     data = np.loadtxt(open(filename, 'rb'), delimiter=',', usecols=(1, 2, 3))
     return data
 
-def dense_to_one_hot(labels_dense, num_classes=256):
+def dense_to_one_hot(labels_dense, num_classes=150):
     """Convert class labels from scalars to one-hot vectors."""
     num_labels = labels_dense.shape[0]
     index_offset = np.arange(num_labels) * num_classes
@@ -30,12 +30,17 @@ class DataSet(object):
         self.keystrokes = keystrokes
         self.labels = labels
         self.epochs_completed = 0
-        self.index_in_epoch = -1
+        self.index_in_epoch = 0
 
     def next_batch(self, batch_size):
-        start = random.randint(0, self.num_examples-batch_size-1)
+        start = self.index_in_epoch# random.randint(0, self.num_examples-batch_size-1)
+        if start + batch_size > self.num_examples:
+            self.epochs_completed += 1
+            print("Starting Epoch %d"%self.epochs_completed)
+            self.index_in_epoch = 0
+            start = self.index_in_epoch
+        self.index_in_epoch += (batch_size//2) + 1
         end = start + batch_size
-        self.index_in_epoch += 1
         return self.keystrokes[start:end], self.labels[start:end]
 
 def read_data_sets(fin):

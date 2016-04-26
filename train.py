@@ -6,70 +6,34 @@ import tensorflow as tf
 import numpy as np
 import reader
 import os
-from tensorflow.models.rnn import rnn, rnn_cell
+
+from six.moves import cPickle
+from model import Model
 
 flags = tf.flags
 logging = tf.logging
 flags.DEFINE_string("csv_path", None, "csv_path")
 FLAGS = flags.FLAGS
 
-
 def one_hot_to_num(arr):
     ''' don't put non-one hot numbers in here! '''
     return np.nonzero(arr)[0]
 
 class Config(object):
-    lr = 0.001
-    training_iters = 12500
-    batch_size = 360
+    lr = 0.005
+    decay_rate = 0.999
+    training_iters = 1250000
+    batch_size = 10240
     display_step = 100
     num_layers = 2
     n_input = 3
-    n_steps = 20 #timestep
+    n_steps = 5 #timestep
 
-    n_hidden = 256
-    n_classes = 256 # potential users
+    n_hidden = 600
+    n_classes = 150 # potential users
     log_dir = 'keystroke_log'
     save_dir = 'keystroke_models'
     save_frequency = 1000
-
-class Model(object):
-    def __init__(self, config):
-        # Tf Graph input
-        self.input_data = tf.placeholder(tf.float32, [None, config.n_steps, config.n_input], name='input')
-
-        # Tensorflow LSTM cell requires 2x n_hidden length (state & cell)
-        self.initial_state = tf.placeholder(tf.float32, [None, 2*config.n_hidden], name='state')
-        self.targets = tf.placeholder(tf.float32, [None, config.n_classes], name='target')
-
-        _X = tf.transpose(self.input_data, [1, 0, 2])  # permute n_steps and batch_size
-        _X = tf.reshape(_X, [-1, config.n_input]) # (n_steps*batch_size, n_input)
-
-        # Define a lstm cell with tensorflow
-        cell = lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=1.0)
-#        lstm_cell = rnn_cell.BasicLSTMCell(config.n_hidden, forget_bias=0.5)
-
-        # Split data because rnn cell needs a list of inputs for the RNN inner loop
-        _X = tf.split(0, config.n_steps, _X) # n_steps * (batch_size, n_hidden)
-        outputs, states = rnn.rnn(cell, _X, initial_state=self.initial_state)
-
-        with tf.variable_scope('output'):
-            softmax_w = tf.get_variable("softmax_w", [config.n_hidden, config.n_classes])
-            softmax_b = tf.get_variable("softmax_b", [config.n_classes])
-        self.logits = logits = tf.matmul(outputs[-1], softmax_w) + softmax_b
-
-        # Loss and optimizer
-        self.cost = cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits, self.targets))
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=config.lr).minimize(cost)
-
-        # Evaluate model
-        correct_pred = tf.equal(tf.argmax(logits,1), tf.argmax(self.targets,1))
-        self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
-
-        with tf.name_scope('summaries'):
-            tf.scalar_summary('cost', self.cost)
-            tf.scalar_summary('accuracy', self.accuracy)
-        self.summary = tf.merge_all_summaries()
 
 def main():
     if not FLAGS.csv_path:
@@ -79,6 +43,8 @@ def main():
 
     config = Config()
     model = Model(config)
+    with open(os.path.join(config.save_dir, 'config.pkl'), 'wb') as f:
+        cPickle.dump(config, f)
 
     with tf.Session() as sess:
         writer = tf.train.SummaryWriter(config.log_dir, sess.graph)
@@ -86,20 +52,22 @@ def main():
         saver = tf.train.Saver(tf.all_variables())
         step = 1
         for step in range(config.training_iters):
+            new_lr = config.lr * (config.decay_rate ** villani.train.epochs_completed)
+            sess.run(tf.assign(model.lr, new_lr))
             batch_xs, batch_ys = villani.train.next_batch(config.batch_size)
             batch_xs = batch_xs.reshape((-1, config.n_steps, config.n_input))
-            batch_ys = batch_ys.reshape((-1, config.n_steps, config.n_classes))[:,7]
+            batch_ys = batch_ys.reshape((-1, config.n_steps, config.n_classes))[:,(config.n_steps-1)]
             _ = sess.run(model.optimizer, feed_dict={
                 model.input_data: batch_xs,
                 model.targets: batch_ys,
-                model.initial_state: np.zeros((batch_xs.shape[0], 2*config.n_hidden))})
+                model.initial_state: np.zeros((batch_xs.shape[0], config.n_hidden))})
 
             if step % config.display_step == 0:
                 # Calculate batch accuracy
                 acc, loss, summary = sess.run([model.accuracy, model.cost, model.summary],
                         feed_dict={model.input_data: batch_xs, model.targets: batch_ys,
-                            model.initial_state: np.zeros((batch_xs.shape[0], 2*config.n_hidden))})
-                print("Index %d, Minibatch Loss= %f, Training Accuracy %f"%((villani.train.index_in_epoch, loss, acc)))
+                            model.initial_state: np.zeros((batch_xs.shape[0], config.n_hidden))})
+                print("Index %d, Minibatch Loss= %f, Training Accuracy %f, Learning Rate %f"%((step, loss, acc, new_lr)))
                 writer.add_summary(summary)
                 writer.flush()
 
